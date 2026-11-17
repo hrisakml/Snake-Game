@@ -1,5 +1,6 @@
 #include <SFML/Graphics.hpp>
 #include <SFML/Audio.hpp>
+#include <iostream>
 #include <algorithm>
 #include <vector>
 #include <cstdlib>
@@ -7,6 +8,7 @@
 #include <string>
 #include <deque>
 #include <string>
+#include <cmath>
 const std::string ASSET_DIR = "assets/";
 enum class State {Menu, Playing, GameOver};
 struct Bomb{
@@ -23,6 +25,7 @@ constexpr int CELL = 30;
 constexpr int COLS = 600/CELL;
 constexpr int ROWS = 600/CELL;
 constexpr int GAP = CELL/speed;
+
 
 void centerText(sf::Text& t, float x, float y){
     sf::FloatRect b = t.getLocalBounds();
@@ -45,21 +48,38 @@ int main(){
     sf::Text bestScore(font, "Best: 0", 20);
     bestScore. setPosition({500.f, 0.f});
 
-    sf::CircleShape bombShape(CELL / 2.f - 4.f);
-    bombShape.setFillColor(sf::Color(40, 40, 40));
-    bombShape.setOutlineColor(sf::Color(255, 140, 0));
-    bombShape.setOutlineThickness(2.f);
-
     sf::RectangleShape tile({CELL, CELL});
     sf::RectangleShape shape({CELL, CELL});
-    sf::CircleShape foodShape (CELL / 2.f - 3.f);
-    foodShape.setFillColor(sf::Color::Red);
+    //sf::CircleShape foodShape (CELL / 2.f - 3.f);
+    //foodShape.setFillColor(sf::Color::Red);
 
     sf::SoundBuffer buffer;
     if (!buffer.loadFromFile(std::string(ASSET_DIR) + "nom.wav")) return 1;
 
     sf::SoundBuffer expbuffer;
     if (!expbuffer.loadFromFile(std::string(ASSET_DIR) + "explode.wav")) return 1;
+
+    sf::Texture bombTexture;
+    if (!bombTexture.loadFromFile(std::string(ASSET_DIR) + "bomb.png")) { std::cerr << "Could not load bomb.png\n"; return 1; }
+
+    sf::Texture appleTexture;
+    if (!appleTexture.loadFromFile(std::string(ASSET_DIR) + "apple.png")) return 1;
+
+    sf::Sprite bombSprite(bombTexture);
+    float bombSize = CELL*1.2f;
+    sf::Vector2u texSize = bombTexture.getSize();
+    bombSprite.setOrigin({texSize.x / 2.f, texSize.y / 2.f});
+    bombSprite.setScale({bombSize / texSize.x, bombSize / texSize.y});
+
+    sf::Sprite appleSprite(appleTexture);
+    float appleSize = CELL*1.2f;
+    sf::Vector2u apSize = appleTexture.getSize();
+    appleSprite.setOrigin({apSize.x / 2.f, apSize.y / 2.f});
+    appleSprite.setScale({appleSize / apSize.x, appleSize / apSize.y});
+
+    sf::Vector2f appleBase(appleSize / apSize.x, appleSize / apSize.y);
+    sf::Vector2f bombBase(bombSize / texSize.x, bombSize / texSize.y);
+    float pulseTime = 0.f;    
 
     sf::Sound sound(buffer);
     sound.setVolume(100.f);
@@ -141,6 +161,7 @@ int main(){
     while (window.isOpen())
     {
         float dt = std::min(clock.restart().asSeconds(), 0.1f);
+        pulseTime += dt;
         while (const std::optional event = window.pollEvent())
         {
             if (event->is<sf::Event::Closed>()){
@@ -200,7 +221,7 @@ int main(){
                     b.timeLeft -=dt;
                     if (b.timeLeft <= 0.f) expired = true;
                 }
-                if (expired) explosion.play();
+                //if (expired) explosion.play();
 
                 bombs.erase(std::remove_if(bombs.begin(), bombs.end(),
                 [](const Bomb& b) { return b.timeLeft <= 0.f; }),
@@ -260,21 +281,32 @@ int main(){
         }
 
         if (state != State::Menu) {
-            foodShape.setPosition({food.x * CELL + 3.f, food.y * CELL + 3.f});
-            window.draw(foodShape);
+            float applePulse = 1.f + 0.12f * std::sin(pulseTime * 4.f);
+            appleSprite.setScale(appleBase * applePulse);
+            appleSprite.setPosition({food.x * CELL + CELL / 2.f,
+                         food.y * CELL + CELL / 2.f});
+            window.draw(appleSprite);
 
             for (const Bomb& b : bombs) {
+                float bombPulse = 1.f + 0.15f * std::sin(pulseTime * 0.8f + b.cell.x);
+                bombSprite.setScale(bombBase * bombPulse);
                 if (b.timeLeft < 1.5f && (int)(b.timeLeft * 6) % 2 == 0) continue;
-                bombShape.setPosition({b.cell.x * CELL + 4.f, b.cell.y * CELL + 4.f});
-                window.draw(bombShape);
+                bombSprite.setPosition({b.cell.x * CELL + CELL / 2.f,
+                        b.cell.y * CELL + CELL / 2.f});
+                window.draw(bombSprite);
             }
 
-            for (int i = length - 1; i >= 0; i--) {
-                shape.setFillColor(i == 0 ? sf::Color(30, 60, 200) : sf::Color(60, 110, 255));
-                // blink during the last 1.5 seconds as a warning
-                shape.setPosition(sf::Vector2f(segPos(i)));
+            shape.setFillColor(sf::Color(60, 110, 255));
+            size_t tailIdx = std::min<size_t>((length - 1) * GAP, trail.size() - 1);
+            for (size_t k = tailIdx; k > 0; k--) {
+                shape.setPosition(sf::Vector2f(trail[k]));
                 window.draw(shape);
             }
+
+            shape.setFillColor(sf::Color(30, 60, 200));
+            shape.setPosition(sf::Vector2f(trail[0]));
+            window.draw(shape);
+
             window.draw(scoreText);
             window.draw(bestScore);
         }
@@ -288,7 +320,7 @@ int main(){
                 info.setString("Press Enter to start");
             } else {
                 title.setString("GAME OVER");
-                info.setString("Score: " + std::to_string(score) +
+                info.setString("Score: " + std::to_string(score) + "\nBest: " + std::to_string(best) +
                                "\nSpace: restart   Esc: menu");
             }
             float cx = window.getSize().x / 2.f;
@@ -297,6 +329,13 @@ int main(){
             centerText(info, cx, cy + 30.f);
             window.draw(title);
             window.draw(info);
+        }
+
+        for (int i=0; i<ROWS; i++){
+            for (int j=0; j<COLS; j++){
+                if (i==0 || i==ROWS-1 || j==0 || j==COLS-1) tile.setFillColor(sf::Color(47, 150, 21));
+                else continue;
+            }
         }
 
         window.display();
